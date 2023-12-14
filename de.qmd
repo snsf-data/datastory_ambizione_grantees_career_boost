@@ -321,7 +321,7 @@ der Ergebnisse dieser Erhebungen (bezogen auf die Jahre 2008--2022). Die
 Forschenden sind der Ansicht, dass Ambizione ihrer Karriere einen deutlichen
 Schub verliehen hat. Konkret konnten sie ihre Kompetenzen, ihr
 wissenschaftliches Profil, ihre Wettbewerbsfähigkeit, ihren Forschungsoutput und
-ihr nationales und internationales Netzwerk verbessern. NNicht alle
+ihr nationales und internationales Netzwerk verbessern. Nicht alle
 Beitragsempfangenden konnten dank Ambizione nach einem Auslandaufenthalt in der
 Schweizer Forschungslandschaft Fuss fassen, die grosse Mehrheit arbeitete jedoch
 auch nach Ablauf der Förderung in der Forschung. Fünf Jahre nach Abschluss des
@@ -523,8 +523,8 @@ Disziplin nicht erleichtert habe.
 
 ::: plot-box
 ::: plot-title
-Der Ambizione-Beitrag hat es mir ermöglicht, in der Schweizer Forschung Fuss zu
-fassen:
+Der Ambizione-Beitrag hat es mir ermöglicht, nach einem Auslandaufenthalt in der
+Schweizer Forschung Fuss zu fassen:
 :::
 
 ```{r return-swiss-science-scene-plot}
