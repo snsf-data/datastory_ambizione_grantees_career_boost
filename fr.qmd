@@ -1,0 +1,655 @@
+---
+title: "`r params$title`"
+format:
+  html:
+    toc: false
+    css: ["style.css"]
+    mainfont: Theinhardt
+    fontsize: "16px"
+    # To use instead of self-contained that has been deprecated
+    embed-resources: true
+    # Using custom page layout (via 'style.css')
+    page-layout: custom
+    # Open link in a new window by default
+    link-external-newwindow: false
+    # Display footnotes in pop-up window when hovering on it
+    footnotes-hover: true
+# The empty params are replaced by those passed to "execute_params" when
+# rendering
+params:
+  title: ""
+  publication_date: ""
+  lang: "fr"
+  doi: ""
+  github_url: ""
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r general-setup, include=FALSE}
+
+## This file contains the FRENCH version of the data story
+
+# Set general chunk options
+knitr::opts_chunk$set(
+  echo = FALSE, fig.showtext = TRUE, fig.retina = 3, fig.align = "center",
+  warning = FALSE, message = FALSE,
+  dev = "svg"
+)
+
+# Install snf.datastory package if not available, otherwise load it
+if (!require("snf.datastory")) {
+  if (!require("devtools")) {
+    install.packages("devtools")
+    library(devtools)
+  }
+  install_github("snsf-data/snf.datastory")
+  library(snf.datastory)
+}
+
+# Load packages
+library(tidyverse)
+library(lubridate)
+library(scales)
+library(conflicted)
+library(jsonlite)
+library(here)
+library(glue)
+library(ggiraph)
+library(showtext)
+library(systemfonts)
+library(snf.datastory)
+library(magrittr)
+
+# Conflict preferences
+conflict_prefer("filter", "dplyr")
+conflict_prefer("get_datastory_theme", "snf.datastory")
+conflict_prefer("get_datastory_scheme", "snf.datastory")
+
+is_theinhardt_available <- file.exists(here("fonts", "TheinhardtReg.otf"))
+
+if (is_theinhardt_available) {
+  
+  sysfonts::font_add(
+    family = "Theinhardt",
+    regular = here("fonts", "TheinhardtReg.otf"),
+    bold = here("fonts", "TheinhardtBold.otf"),
+    bolditalic = here("fonts", "TheinhardtBoldIt.otf"),
+    italic = here("fonts", "TheinhardtRegIt.otf"),
+  )
+  
+  # Need to register the font to allow its use by ggiraph when creating SVG
+  # files.
+  if (!font_family_exists("Theinhardt")) {
+    
+    # Register existing/downloaded fonts
+    register_font(
+      name = "Theinhardt",
+      plain = list("fonts/TheinhardtReg.otf", 0),
+      bold = list("fonts/TheinhardtBold.otf", 0),
+      italic = list("fonts/TheinhardtRegIt.otf", 0),
+      bolditalic = list("fonts/TheinhardtBoldIt.otf", 0)
+    )
+  }
+  
+  font <- "Theinhardt"
+  
+} else {
+  
+  font <- "Arial"
+  
+}
+
+# Need if we want to use the registered font in ggiraph plots
+showtext_auto()
+
+# Increase showtext package font resolution
+showtext_opts(dpi = 320)
+
+# Set the locale for date formatting (Windows)
+Sys.setlocale(
+  "LC_TIME",
+  switch(
+    params$lang,
+    en = "English",
+    de = "German",
+    fr = "French"
+  )
+)
+
+# Create function to print number with local language-specific format
+print_num <- function(x) snf.datastory::print_num(x, lang = params$lang)
+
+# Knitr hook for local formatting of printed numbers
+knitr::knit_hooks$set(
+  inline <- function(x) {
+    if (!is.numeric(x)) {
+      x
+    } else {
+      print_num(x)
+    }
+  }
+)
+
+# Function that returns the desired language version of a string, given three
+# language strings are provided to the function.
+translate <- function(en_string = "NOT TRANSLATED",
+                      de_string = "NOT TRANSLATED",
+                      fr_string = "NOT TRANSLATED",
+                      lang = "en") {
+  
+  string <-
+    case_when(
+      lang == "en" ~ en_string, 
+      lang == "de" ~ de_string, 
+      lang == "fr" ~ fr_string, 
+      TRUE ~ "NO VALID LANGUAGE SPECIFIED"
+    )
+  
+  return(string)
+  
+}
+
+```
+
+```{r print-header-infos}
+#| results: asis
+
+# Add publication date to header
+cat(format(as_datetime(params$publication_date), "%d.%m.%Y"))
+```
+
+```{r story-specific-setup}
+#| include: false
+
+# Set story-specific variables etc. here
+
+input_dir <- "data"
+
+surveys <- read_csv(here(input_dir, "data.csv"),
+                    show_col_types = FALSE)
+
+# Plot helper functions
+
+default_levels <- c("No assessment possible",
+                    "Completely inaccurate",
+                    "Rather inaccurate",
+                    "Rather accurate",
+                    "Very accurate")
+
+comparison_df <- function(df, column, lvls = default_levels) {
+  df %>%
+    select(run, question = all_of(column)) %>%
+    filter(!is.na(question),
+           !question == "") %>%
+    mutate(question = str_replace(question, "Prof", "prof"),
+           question = str_replace(question, ", namely:", ""),
+           question = factor(question,
+                             levels = lvls)) %>%
+    count(run, question) %>%
+    pivot_wider(names_from = run, values_from = n, values_fill = 0) %>%
+    mutate(`1 year after the grant` = `1`/sum(`1`),
+           `5 years after the grant` = `2`/sum(`2`)) %>%
+    select(-c(`1`, `2`)) %>%
+    pivot_longer(cols = c(`1 year after the grant`,
+                          `5 years after the grant`)) %>%
+    mutate(name = name %>% factor(levels = c("5 years after the grant",
+                                             "1 year after the grant")))
+}
+
+comparison_transl <- function(df) {
+  df %>%
+    mutate(name = name %>%
+             recode("1 year after the grant" =
+                      translate("1 year after the grant",
+                                "1 Jahr nach der Förderung",
+                                "1 an après la fin du subside",
+                                params$lang),
+                    "5 years after the grant" =
+                      translate("5 years after the grant",
+                                "5 Jahre nach der Förderung",
+                                "5 ans après la fin du subside",
+                                params$lang)),
+           question = question %>%
+             recode("Other position" =
+                      translate("Other position", "Andere Position", "Autre",
+                                params$lang),
+                    "Scientific collaborator" =
+                      translate("Scientific collaborator",
+                                "Wissenschaftliche Mitarbeit",
+                                "Collaboratrice ou collaborateur scientifique",
+                                params$lang),
+                    "Assistant" =
+                      translate("Assistant", "Assistenz", "Assistant·e",
+                                params$lang),
+                    "Postdoc" =
+                      translate("Postdoc", "Postdoktorand:in",
+                                "Postdoctorant·e", params$lang),
+                    "Lecturer" =
+                      translate("Lecturer", "Dozentenstelle",
+                                "Chargé·e de cours", params$lang),
+                    "SNSF professor" =
+                      translate("SNSF professor", "SNF-Förderungsprofessur",
+                                "Professeur·e FNS", params$lang),
+                    "Assistant professor (without tenure track)" =
+                      translate("Assistant professor (without tenure track)",
+                                "Assistenzprofessur (ohne Aussicht auf Festanstellung)",
+                                "Professeur·e assistant·e (hors prétitularisation conditionnelle)",
+                                params$lang),
+                    "Assistant professor (with tenure track)" =
+                      translate("Assistant professor (with tenure track)",
+                                "Assistenzprofessur (mit Aussicht auf Festanstellung)",
+                                "Professeur·e assistant·e (en prétitularisation conditionnelle)",
+                                params$lang),
+                    "Associate professor" =
+                      translate("Associate professor",
+                                "Ausserordentliche Professur",
+                                "Professeur·e associé·e", params$lang),
+                    "Full professor" =
+                      translate("Full professor",  "Ordentliche Professur",
+                                "Professeur·e titulaire", params$lang),
+                    "No assessment possible" =
+                      translate("No assessment possible", "Weiss nicht",
+                                "Ne se prononce pas", params$lang),
+                    "Completely inaccurate" =
+                      translate("Completely inaccurate",
+                                "Trifft überhaupt nicht zu",
+                                "Pas du tout d’accord", params$lang),
+                    "Rather inaccurate" =
+                       translate("Rather inaccurate", "Trifft eher nicht zu",
+                                 "Plutôt pas d’accord", params$lang),
+                    "Rather accurate" =
+                       translate("Rather accurate", "Trifft eher zu",
+                                 "Plutôt d’accord", params$lang),
+                    "Very accurate" =
+                       translate("Very accurate", "Trifft voll und ganz zu",
+                                 "Tout à fait d’accord", params$lang)))
+}
+
+comparison_plot <- function(df) {
+  df %>%
+    ggplot(aes(x = value,
+               y = name,
+               fill = question)) +
+    geom_col(width = .6) +
+    geom_text(aes(label = if_else(question %>% as.numeric ==
+                                    question %>% as.numeric %>% max,
+                                  name %>% as.character, ""),
+                  x = 0,
+                  y = name %>% as.numeric + 0.5),
+              hjust = 0,
+              size = 3,
+              show.legend = FALSE,
+              inherit.aes = FALSE) +
+    get_datastory_theme(legend_position = "bottom",
+                        legend_margin = ggplot2::margin(l = 7.5, unit = "mm"),
+                        family = "Theinhardt",
+                        text_axis = "x") +
+    scale_fill_manual(values =
+                        # Do not use the fourth color: [-4]
+                        # Use colors in inverted order
+                        get_datastory_scheme()[-4][5:1],
+                      guide = guide_legend(reverse = TRUE)) +
+    scale_x_continuous(labels = label_percent(accuracy = 1),
+                       breaks = c(0, 0.25, 0.5, 0.75, 1))
+}
+```
+
+
+<!-- Short lead (2-3 sentences) in bold -->
+
+**Le FNS mène des enquêtes annuelles pour analyser l’effet des subsides
+Ambizione sur ses bénéficiaires. Selon les sondé·es, Ambizione a une influence
+positive sur leur profil scientifique et un effet dynamisant sur leur
+carrière.**
+
+Les subsides Ambizione visent à soutenir les jeunes chercheuses et chercheurs
+(dans les quatre ans après le doctorat) qui souhaitent réaliser, gérer et
+diriger un projet planifié de manière autonome au sein d’une haute école suisse.
+À l’issue du subside, les bénéficiaires sont censés poursuivre leur parcours
+académique ou transférer leurs compétences hors du milieu académique, dans le
+secteur public ou l’industrie. L’instrument d’encouragement Ambizione, qui a vu
+le jour en 2008, a financé près de 1100 scientifiques en Suisse en quinze ans.
+En 2014, il a fait l’objet d’une [évaluation
+externe](https://www.snf.ch/media/fr/NlJLMmRjkfveCv2f/ambizione_evaluationsbericht_f.pdf)
+comprenant une enquête auprès des bénéficiaires des subsides pour déterminer les
+effets du financement sur l’évolution ultérieure de leur carrière. Depuis lors,
+le FNS réalise une telle enquête chaque année.
+
+Dans ce récit de données, nous présentons une compilation détaillée des
+résultats de ces enquêtes (sur les années 2008--2022). Les chercheuses et
+chercheurs déclarent qu’Ambizione a donné une forte impulsion à leur carrière.
+Participer à ce programme leur a permis de développer leurs compétences et leur
+profil scientifique, d’augmenter le nombre et la qualité de leurs publications
+scientifiques et de renforcer leur réseau de collaboration tant sur le plan
+national qu’international. Si les bénéficiaires des subsides Ambizione ne sont
+pas tou·tes parvenu·es à se faire une place au sein de la communauté
+scientifique suisse après un éjour à l'étranger, la grande majorité
+d’entre elles et eux a continué à œuvrer dans la recherche après la fin du
+financement. Cinq ans après la fin du programme d’encouragement, environ trois
+quarts des bénéficiaires occupaient un poste de professeur·e, en Suisse ou à
+l’étranger.
+
+::: info-box
+
+### Jeu de données d’origine et cohortes
+
+Chaque année, le FNS communique avec les bénéficiaires des subsides Ambizione
+pour lesquels le programme d’encouragement a pris fin l’année précédente. Cela
+concerne aussi bien les chercheuses et chercheurs qui sont allés au bout de leur
+projet que celles et ceux qui ont interrompu leurs subsides prématurément, ayant
+obtenu un nouveau poste. Les personnes interrogées s’expriment sur le subside
+Ambizione et sur ses retombées sur l’évolution de leur carrière. Ces personnes
+forment la cohorte 1 («&nbsp;1 an après la fin du subside&nbsp;»). Le FNS contacte
+également d’anciens bénéficiaires de l’encouragement Ambizione dont les subsides
+ont pris fin cinq ans auparavant. Ces personnes-là forment la cohorte 2 («&nbsp;5
+ans après la fin du subside&nbsp;»). Par exemple, en 2020, la cohorte «&nbsp;1 an
+après la fin du subside&nbsp;» se composait de bénéficiaires Ambizione dont la
+période d’encouragement s’est achevée en 2019, tandis que la cohorte «&nbsp;5
+ans après la fin du subside&nbsp;» était, quant à elle, constituée de
+bénéficiaires Ambizione dont la période d’encouragement s’est achevée en 2015.
+Le taux de réponse se monte à près de 50% pour chacune des cohortes.
+
+:::
+
+### Effets sur la qualification scientifique des bénéficiaires
+
+::: plot-box
+::: plot-title
+Le subside Ambizione m’a permis d’améliorer mes compétences dans mon domaine de
+recherche&nbsp;:
+:::
+
+```{r improved-competence-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("improved.competence.in.research.field") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+Les bénéficiaires estiment que le subside Ambizione a consolidé leur expertise
+scientifique. La grande majorité de ces scientifiques (>&nbsp;95%) déclare avoir
+amélioré ses compétences grâce au subside Ambizione, que la période de référence
+porte sur la première année ou les cinq années après la fin du programme
+d’encouragement.
+
+::: plot-box
+::: plot-title
+Le subside Ambizione m’a permis d’étoffer mon profil scientifique&nbsp;:
+:::
+
+```{r enhanced-profile-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("enhanced.scientific.profile") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+S’agissant du profil scientifique, la grande majorité des bénéficiaires du
+subside Ambizione (>&nbsp;95%), indépendamment de la cohorte, estime que le
+programme d’encouragement lui a permis d’étoffer son profil scientifique.
+
+::: plot-box
+::: plot-title
+Le subside Ambizione m’a permis de renforcer ma compétitivité
+scientifique&nbsp;:
+:::
+
+```{r increased_competitiveness-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("increased.scientific.competitiveness") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+Dans l’ensemble, les bénéficiaires Ambizione conviennent que leur compétitivité
+scientifique s’est accrue grâce au subside. Les résultats obtenus sont
+similaires dans les deux cohortes&nbsp;; seule une minorité de bénéficiaires
+(<&nbsp;10%) doutent des effets du subside Ambizione sur leur compétitivité
+scientifique.
+
+### Effets sur les résultats de recherche des bénéficiaires
+
+::: plot-box
+::: plot-title
+Le subside Ambizione m’a permis d’accroître mon nombre de publications
+scientifiques&nbsp;:
+:::
+
+```{r increased-publications-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("increased.number.of.scientific.publications") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+Le programme Ambizione semble stimuler la productivité des bénéficiaires des
+subsides, comme en témoigne la hausse de leurs publications. Les résultats sont
+cependant plus contrastés, et ce indépendamment de la cohorte&nbsp;: de 50 à
+60% des bénéficiaires adhèrent pleinement à cette affirmation, tandis que
+de 30 à 40% y adhèrent en partie. Seule une minorité des personnes
+interrogées (15 à 20%) contestent un effet entre le subside et le nombre de
+leurs publications scientifiques.
+
+::: plot-box
+::: plot-title
+Le subside Ambizione m’a permis de produire des publications scientifiques de
+meilleure qualité&nbsp;:
+:::
+
+```{r improved-publication-quality-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("improved.quality.of.scientific.publications") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+La plupart des bénéficiaires dans les deux cohortes (75 à 80%) font état
+d’une hausse de la qualité de leurs publications scientifiques, évolution qu’ils
+imputent à Ambizione. Tou·tes les bénéficiaires ne partagent cependant pas ce
+point de vue&nbsp;: une minorité d’entre eux et elles (<&nbsp;20%) remettent en
+question l’effet favorable du subside sur la qualité de leurs publications,
+quelle que soit la cohorte.
+
+### Effets sur le réseau de collaboration des bénéficiaires
+
+::: plot-box
+::: plot-title
+Le subside Ambizione m’a permis de développer mon réseau international&nbsp;:
+:::
+
+```{r improved-networking-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("improved.networking") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+La majorité des bénéficiaires d’un subside au sein des deux cohortes (75 à
+80%) estime qu’Ambizione a favorisé l’élargissement de leur réseau
+international. Ces résultats sont toutefois contrastés&nbsp;: 35 à 40% des
+bénéficiaires adhèrent à cette affirmation, tandis que 35 à 50% n’y
+adhèrent qu’en partie. Seul·es 3% des sondé·es n’ont perçu aucun
+effet du subside Ambizione sur l’évolution de leur réseau international,
+indépendamment de la cohorte.
+
+::: plot-box
+::: plot-title
+Le subside Ambizione m’a permis de fréquenter plus facilement des scientifiques
+de premier plan dans mon domaine&nbsp;:
+:::
+
+```{r leading-scientist-access-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("easier.access.to.leading.scientists") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+La plupart des bénéficiaires des deux cohortes (70 à 75%) estiment que le
+subside Ambizione leur a permis de fréquenter plus facilement des scientifiques
+de premier plan dans leur domaine de recherche. Mais seuls 30% adhèrent
+pleinement à cette affirmation, tandis que 40 à 45% y adhèrent en partie.
+À l’inverse, environ 25% des bénéficiaires des deux cohortes estiment que
+le programme Ambizione ne leur a pas permis de fréquenter plus facilement des
+scientifiques de premier plan dans leur domaine de recherche.
+
+::: plot-box
+::: plot-title
+Le subside Ambizione m’a permis de prendre pied dans la communauté scientifique
+suisse après un séjour à l'étranger :
+:::
+
+```{r return-swiss-science-scene-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("enabled.to.return.to.swiss.science.scene") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+::: caption
+Jusqu'en 2012, les requérant·es devaient effectuer un séjour à l'étranger avant
+de poser leur candidature à une bourse Ambizione. De 2012 à 2020, les
+requérant·es devaient effectuer un séjour dans une institution de recherche
+différente de celle de leur doctorat avant de poser leur candidature.
+:::
+
+:::
+
+Pour les deux cohortes, la question de savoir si le subside Ambizione permet aux
+chercheuses et chercheurs de s’imposer en Suisse après un séjour à l'étranger
+livre des résultats contrastés. Dans la cohorte «&nbsp;1 an après la fin du
+subside&nbsp;», les sondé·es estiment à hauteur de 50% environ que le subside a
+favorisé leur établissement dans l’environnement scientifique suisse, tandis que
+25% pensent le contraire. Fait intéressant&nbsp;: 25% des bénéficiaires ne
+sont pas en mesure de dire si le subside Ambizione leur a ouvert les portes de
+la communauté scientifique suisse.
+
+Au sein de la cohorte «&nbsp;5 ans après la fin du subside&nbsp;», les
+bénéficiaires Ambizione sont davantage convaincus, à 55% environ, que le
+subside les a aidés à s’établir dans la communauté scientifique suisse. En
+revanche, les voix qui estiment que le subside n’a pas été d’une grande aide à
+cet égard y sont également plus nombreuses (30%). À l’instar de la cohorte
+«&nbsp;1 an après la fin du subside&nbsp;», un nombre considérable de sondé·es
+ne se sont pas prononcés sur cette question (20%).
+
+### Effets sur l’évolution de la carrière des bénéficiaires
+
+::: plot-box
+::: plot-title
+Quel poste occupez-vous actuellement&nbsp;?
+:::
+
+```{r current-position-plot}
+#| out-width: "100%"
+#| fig-height: 3
+
+current_position_lvls <- c("Other position",
+                           "Scientific collaborator",
+                           "Assistant",
+                           "Postdoc",
+                           "Lecturer",
+                           "SNSF professor",
+                           "Assistant professor (without tenure track)",
+                           "Assistant professor (with tenure track)",
+                           "Associate professor",
+                           "Full professor")
+
+surveys %>%
+  comparison_df("current.position", lvls = current_position_lvls) %>%
+  comparison_transl %>%
+  comparison_plot +
+  scale_fill_manual(values = get_datastory_scheme()[-4][10:1],
+                    guide = guide_legend(reverse = TRUE, ncol = 2))
+```
+
+:::
+
+Les postes occupés par les bénéficiaires des subsides Ambizione après la fin du
+programme d’encouragement sont de nature très variée dans les deux cohortes.
+Indépendamment de la cohorte, une grande majorité des bénéficiaires Ambizione
+(80 à 85%) sont restés dans le monde académique, en tant que professeur·e,
+chercheuse ou chercheur, ou encore collaboratrice ou collaborateur scientifique.
+Seule une minorité des sondé·es ont trouvé un poste en dehors du monde
+académique, principalement dans l’industrie, le secteur public ou l’enseignement
+(15 à 20%, catégorie «&nbsp;Autre&nbsp;»).
+
+Au sein de la cohorte «&nbsp;1 an après la fin du subside&nbsp;», 55%
+environ des bénéficiaires Ambizione occupaient un poste dans le corps
+professoral, la majorité -- approximativement 45% -- en tant que
+professeur·e assistant·e, professeur·e boursier/boursière FNS ou chargé·e de
+cours. Environ 25% des bénéficiaires étaient soit chercheuses ou
+chercheurs postdoctorant·es, assistant·es ou collaboratrices ou collaborateurs
+scientifiques.
+
+Au sein de la cohorte «&nbsp;5 ans après la fin du subside&nbsp;», 70%
+environ des bénéficiaires Ambizione occupaient un poste dans le corps
+professoral&nbsp;: 40% un poste de professeur·e titulaire ou associé·e,
+30% un poste de professeur·e assistant·e, de professeur·e
+boursier/boursière FNS ou de chargé·e de cours. 5% des bénéficiaires étaient
+soit chercheuses ou chercheurs postdoctorant·es, assistant·es ou encore
+collaboratrices ou collaborateurs scientifiques.
+
+### Multiples effets positifs
+
+En conclusion, on retiendra que les bénéficiaires Ambizione apprécient
+grandement l’incidence positive du subside sur leur profil scientifique,
+notamment en ce qui concerne leurs compétences, leurs publications
+scientifiques, leur compétitivité et leur réseau de collaboration. Dans
+l’ensemble, les sondé·es lui reconnaissent un effet dynamisant sur leur
+carrière, indépendamment de la cohorte et du poste occupé par la suite.
+
+Les données, le texte et le code de ce récit de données sont [disponibles sur Github](`r params$github_url`) et [archivés sur Zenodo](`r params$doi`). <br>DOI: `r str_remove(params$doi, "https://doi.org/")`
+
+```{r prevent-internal-snsf-packages, include=FALSE}
+#| include: false
+
+# Internal SNSF packages must not be used in data stories, as their
+# pre-processing functions are internal and the corporate design differs from
+# the data portal.
+if (any(c("snfverse", "snf.preprocessing", "snf.plot") %in% 
+        loadedNamespaces())) {
+  stop(glue(
+    "You must not use internal SNSF packages in data stories.",
+    " Please resort to snf.datastory."
+  ))
+}
+```

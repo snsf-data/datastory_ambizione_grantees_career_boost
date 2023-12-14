@@ -1,0 +1,643 @@
+---
+title: "`r params$title`"
+format:
+  html:
+    toc: false
+    css: ["style.css"]
+    mainfont: Theinhardt
+    fontsize: "16px"
+    # To use instead of self-contained that has been deprecated
+    embed-resources: true
+    # Using custom page layout (via 'style.css')
+    page-layout: custom
+    # Open link in a new window by default
+    link-external-newwindow: false
+    # Display footnotes in pop-up window when hovering on it
+    footnotes-hover: true
+# The empty params are replaced by those passed to "execute_params" when
+# rendering
+params:
+  title: ""
+  publication_date: ""
+  lang: "de"
+  doi: ""
+  github_url: ""
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r general-setup, include=FALSE}
+
+## This file contains the GERMAN version of the data story
+
+# Set general chunk options
+knitr::opts_chunk$set(
+  echo = FALSE, fig.showtext = TRUE, fig.retina = 3, fig.align = "center",
+  warning = FALSE, message = FALSE,
+  dev = "svg"
+)
+
+# Install snf.datastory package if not available, otherwise load it
+if (!require("snf.datastory")) {
+  if (!require("devtools")) {
+    install.packages("devtools")
+    library(devtools)
+  }
+  install_github("snsf-data/snf.datastory")
+  library(snf.datastory)
+}
+
+# Load packages
+library(tidyverse)
+library(lubridate)
+library(scales)
+library(conflicted)
+library(jsonlite)
+library(here)
+library(glue)
+library(ggiraph)
+library(showtext)
+library(systemfonts)
+library(snf.datastory)
+library(magrittr)
+
+# Conflict preferences
+conflict_prefer("filter", "dplyr")
+conflict_prefer("get_datastory_theme", "snf.datastory")
+conflict_prefer("get_datastory_scheme", "snf.datastory")
+
+is_theinhardt_available <- file.exists(here("fonts", "TheinhardtReg.otf"))
+
+if (is_theinhardt_available) {
+  
+  sysfonts::font_add(
+    family = "Theinhardt",
+    regular = here("fonts", "TheinhardtReg.otf"),
+    bold = here("fonts", "TheinhardtBold.otf"),
+    bolditalic = here("fonts", "TheinhardtBoldIt.otf"),
+    italic = here("fonts", "TheinhardtRegIt.otf"),
+  )
+  
+  # Need to register the font to allow its use by ggiraph when creating SVG
+  # files.
+  if (!font_family_exists("Theinhardt")) {
+    
+    # Register existing/downloaded fonts
+    register_font(
+      name = "Theinhardt",
+      plain = list("fonts/TheinhardtReg.otf", 0),
+      bold = list("fonts/TheinhardtBold.otf", 0),
+      italic = list("fonts/TheinhardtRegIt.otf", 0),
+      bolditalic = list("fonts/TheinhardtBoldIt.otf", 0)
+    )
+  }
+  
+  font <- "Theinhardt"
+  
+} else {
+  
+  font <- "Arial"
+  
+}
+
+# Need if we want to use the registered font in ggiraph plots
+showtext_auto()
+
+# Increase showtext package font resolution
+showtext_opts(dpi = 320)
+
+# Set the locale for date formatting (Windows)
+Sys.setlocale(
+  "LC_TIME",
+  switch(
+    params$lang,
+    en = "English",
+    de = "German",
+    fr = "French"
+  )
+)
+
+# Create function to print number with local language-specific format
+print_num <- function(x) snf.datastory::print_num(x, lang = params$lang)
+
+# Knitr hook for local formatting of printed numbers
+knitr::knit_hooks$set(
+  inline <- function(x) {
+    if (!is.numeric(x)) {
+      x
+    } else {
+      print_num(x)
+    }
+  }
+)
+
+# Function that returns the desired language version of a string, given three
+# language strings are provided to the function.
+translate <- function(en_string = "NOT TRANSLATED",
+                      de_string = "NOT TRANSLATED",
+                      fr_string = "NOT TRANSLATED",
+                      lang = "en") {
+  
+  string <-
+    case_when(
+      lang == "en" ~ en_string, 
+      lang == "de" ~ de_string, 
+      lang == "fr" ~ fr_string, 
+      TRUE ~ "NO VALID LANGUAGE SPECIFIED"
+    )
+  
+  return(string)
+  
+}
+
+```
+
+```{r print-header-infos}
+#| results: asis
+
+# Add publication date to header
+cat(format(as_datetime(params$publication_date), "%d.%m.%Y"))
+```
+
+```{r story-specific-setup}
+#| include: false
+
+# Set story-specific variables etc. here
+
+input_dir <- "data"
+
+surveys <- read_csv(here(input_dir, "data.csv"),
+                    show_col_types = FALSE)
+
+# Plot helper functions
+
+default_levels <- c("No assessment possible",
+                    "Completely inaccurate",
+                    "Rather inaccurate",
+                    "Rather accurate",
+                    "Very accurate")
+
+comparison_df <- function(df, column, lvls = default_levels) {
+  df %>%
+    select(run, question = all_of(column)) %>%
+    filter(!is.na(question),
+           !question == "") %>%
+    mutate(question = str_replace(question, "Prof", "prof"),
+           question = str_replace(question, ", namely:", ""),
+           question = factor(question,
+                             levels = lvls)) %>%
+    count(run, question) %>%
+    pivot_wider(names_from = run, values_from = n, values_fill = 0) %>%
+    mutate(`1 year after the grant` = `1`/sum(`1`),
+           `5 years after the grant` = `2`/sum(`2`)) %>%
+    select(-c(`1`, `2`)) %>%
+    pivot_longer(cols = c(`1 year after the grant`,
+                          `5 years after the grant`)) %>%
+    mutate(name = name %>% factor(levels = c("5 years after the grant",
+                                             "1 year after the grant")))
+}
+
+comparison_transl <- function(df) {
+  df %>%
+    mutate(name = name %>%
+             recode("1 year after the grant" =
+                      translate("1 year after the grant",
+                                "1 Jahr nach der Förderung",
+                                "1 an après la fin du subside",
+                                params$lang),
+                    "5 years after the grant" =
+                      translate("5 years after the grant",
+                                "5 Jahre nach der Förderung",
+                                "5 ans après la fin du subside",
+                                params$lang)),
+           question = question %>%
+             recode("Other position" =
+                      translate("Other position", "Andere Position", "Autre",
+                                params$lang),
+                    "Scientific collaborator" =
+                      translate("Scientific collaborator",
+                                "Wissenschaftliche Mitarbeit",
+                                "Collaboratrice ou collaborateur scientifique",
+                                params$lang),
+                    "Assistant" =
+                      translate("Assistant", "Assistenz", "Assistant·e",
+                                params$lang),
+                    "Postdoc" =
+                      translate("Postdoc", "Postdoktorand:in",
+                                "Postdoctorant·e", params$lang),
+                    "Lecturer" =
+                      translate("Lecturer", "Dozentenstelle",
+                                "Chargé·e de cours", params$lang),
+                    "SNSF professor" =
+                      translate("SNSF professor", "SNF-Förderungsprofessur",
+                                "Professeur·e FNS", params$lang),
+                    "Assistant professor (without tenure track)" =
+                      translate("Assistant professor (without tenure track)",
+                                "Assistenzprofessur (ohne Aussicht auf Festanstellung)",
+                                "Professeur·e assistant·e (hors prétitularisation conditionnelle)",
+                                params$lang),
+                    "Assistant professor (with tenure track)" =
+                      translate("Assistant professor (with tenure track)",
+                                "Assistenzprofessur (mit Aussicht auf Festanstellung)",
+                                "Professeur·e assistant·e (en prétitularisation conditionnelle)",
+                                params$lang),
+                    "Associate professor" =
+                      translate("Associate professor",
+                                "Ausserordentliche Professur",
+                                "Professeur·e associé·e", params$lang),
+                    "Full professor" =
+                      translate("Full professor",  "Ordentliche Professur",
+                                "Professeur·e titulaire", params$lang),
+                    "No assessment possible" =
+                      translate("No assessment possible", "Weiss nicht",
+                                "Ne se prononce pas", params$lang),
+                    "Completely inaccurate" =
+                      translate("Completely inaccurate",
+                                "Trifft überhaupt nicht zu",
+                                "Pas du tout d’accord", params$lang),
+                    "Rather inaccurate" =
+                       translate("Rather inaccurate", "Trifft eher nicht zu",
+                                 "Plutôt pas d’accord", params$lang),
+                    "Rather accurate" =
+                       translate("Rather accurate", "Trifft eher zu",
+                                 "Plutôt d’accord", params$lang),
+                    "Very accurate" =
+                       translate("Very accurate", "Trifft voll und ganz zu",
+                                 "Tout à fait d’accord", params$lang)))
+}
+
+comparison_plot <- function(df) {
+  df %>%
+    ggplot(aes(x = value,
+               y = name,
+               fill = question)) +
+    geom_col(width = .6) +
+    geom_text(aes(label = if_else(question %>% as.numeric ==
+                                    question %>% as.numeric %>% max,
+                                  name %>% as.character, ""),
+                  x = 0,
+                  y = name %>% as.numeric + 0.5),
+              hjust = 0,
+              size = 3,
+              show.legend = FALSE,
+              inherit.aes = FALSE) +
+    get_datastory_theme(legend_position = "bottom",
+                        legend_margin = ggplot2::margin(l = 7.5, unit = "mm"),
+                        family = "Theinhardt",
+                        text_axis = "x") +
+    scale_fill_manual(values =
+                        # Do not use the fourth color: [-4]
+                        # Use colors in inverted order
+                        get_datastory_scheme()[-4][5:1],
+                      guide = guide_legend(reverse = TRUE)) +
+    scale_x_continuous(labels = label_percent(accuracy = 1),
+                       breaks = c(0, 0.25, 0.5, 0.75, 1))
+}
+```
+
+
+<!-- Short lead (2-3 sentences) in bold -->
+
+**Der SNF evaluiert jährlich den Nutzen der Ambizione-Beiträge für die Laufbahn
+der Forschenden. Die Beitragsempfangenden schätzen die Wirkung auf ihr
+wissenschaftliches Profil sehr positiv ein und berichten von einem
+Karriereschub.**
+
+Ambizione-Beiträge richten sich an Forschende auf einer frühen Karrierestufe,
+die selbständig ein Projekt an einer Schweizer Hochschule durchführen und leiten
+möchten. Es wird erwartet, dass sie nach der Förderung entweder ihre
+wissenschaftliche Laufbahn fortsetzen oder ihre Kompetenzen ausserhalb der
+akademischen Welt anwenden, sei es in der öffentlichen Verwaltung oder in der
+Wirtschaft. Das Förderinstrument Ambizione wurde 2008 lanciert und läuft seit 15
+Jahren. In dieser Zeit wurden rund 1100 Forschende in der Schweiz unterstützt.
+Im Jahr 2014 wurde Ambizione [extern
+evaluiert](https://www.snf.ch/media/fr/NlJLMmRjkfveCv2f/ambizione_evaluationsbericht_d.pdf),
+unter anderem mit einer Umfrage bei den geförderten Forschenden. Ziel war es,
+die Wirkung der Beiträge auf die Laufbahn der Forschenden zu bestimmen. Seither
+führt der SNF jedes Jahr eine solche Befragung durch.
+
+In dieser Datengeschichte präsentieren wir eine detaillierte Zusammenstellung
+der Ergebnisse dieser Erhebungen (bezogen auf die Jahre 2008--2022). Die
+Forschenden sind der Ansicht, dass Ambizione ihrer Karriere einen deutlichen
+Schub verliehen hat. Konkret konnten sie ihre Kompetenzen, ihr
+wissenschaftliches Profil, ihre Wettbewerbsfähigkeit, ihren Forschungsoutput und
+ihr nationales und internationales Netzwerk verbessern. NNicht alle
+Beitragsempfangenden konnten dank Ambizione nach einem Auslandaufenthalt in der
+Schweizer Forschungslandschaft Fuss fassen, die grosse Mehrheit arbeitete jedoch
+auch nach Ablauf der Förderung in der Forschung. Fünf Jahre nach Abschluss des
+Beitrags waren rund drei Viertel der Befragten im Rahmen einer Professur in der
+Schweiz oder im Ausland tätig.
+
+::: info-box
+
+### Originaldatensätze und -kohorten
+
+Der SNF kontaktiert jedes Jahr die Forschenden, deren Ambizione-Förderung im
+Vorjahr auslief. Dazu gehören Beitragsempfangende, die den vollen Förderzeitraum
+beendeten, und solche, die vor dem Beitragsende auf eine neue Stelle wechselten.
+Die unterstützten Forschenden werden zu ihrem Ambizione-Beitrag und dessen
+Wirkung auf ihre Karriere befragt. Diese Gruppe wird als die Kohorte «1 Jahr
+nach der Förderung» bezeichnet. Der SNF kontaktiert auch frühere
+Beitragsempfangende, deren Ambizione-Förderung vor fünf Jahren endete. Diese
+Gruppe bildet die Kohorte «5 Jahre nach der Förderung». Zum Beispiel bestand
+2020 die Kohorte «1 Jahr nach der Förderung» aus ehemaligen
+Ambizione-Beitragsempfangenden, deren Unterstützung 2019 endete. Die Kohorte «5
+Jahre nach der Förderung» betraf die Beitragsempfangenden, deren
+Ambizione-Unterstützung 2015 auslief. Die Rücklaufquote lag für beide Kohorten
+bei rund 50%.
+
+:::
+
+### Auswirkungen auf die wissenschaftliche Qualifikation
+
+::: plot-box
+::: plot-title
+Der Ambizione-Beitrag hat meine Kompetenz in meinem Forschungsgebiet verbessert:
+:::
+
+```{r improved-competence-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("improved.competence.in.research.field") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+Die Beitragsempfangenden sind der Meinung, dass der Ambizione-Beitrag ihre
+Forschungskompetenzen gestärkt hat. Unabhängig davon, ob sie kurz nach
+Beitragsende oder vier Jahre später befragt wurden, gibt die überwiegende
+Mehrheit (>95%) der Geförderten an, dass sich ihre Kompetenzen dank des
+Ambizione-Beitrags verbessert haben.
+
+::: plot-box
+::: plot-title
+Der Ambizione-Beitrag hat mein wissenschaftliches Profil gestärkt:
+:::
+
+```{r enhanced-profile-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("enhanced.scientific.profile") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+Die überwiegende Mehrheit der Beitragsempfangenden (>95%) ist der Meinung,
+dass ihr wissenschaftliches Profil durch den Ambizione-Beitrag gestärkt wurde --
+unabhängig von der Kohorte.
+
+::: plot-box
+::: plot-title
+Der Ambizione-Beitrag hat meine wissenschaftliche Wettbewerbsfähigkeit erhöht:
+:::
+
+```{r increased_competitiveness-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("increased.scientific.competitiveness") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+Insgesamt sind die Befragten der Meinung, dass ihre wissenschaftliche
+Wettbewerbsfähigkeit durch den Ambizione-Beitrag erhöht wurde. Für beide
+Kohorten resultierten ähnliche Ergebnisse, wobei nur eine Minderheit der
+Beitragsempfangenden (<10%) bezweifelt, dass der Ambizione-Beitrag ihre
+wissenschaftliche Wettbewerbsfähigkeit positiv beeinflusste.
+
+### Auswirkungen auf den Leistungsausweis
+
+::: plot-box
+::: plot-title
+Dank Ambizione konnte ich mehr wissenschaftliche Publikationen realisieren:
+:::
+
+```{r increased-publications-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("increased.number.of.scientific.publications") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+Der Ambizione-Beitrag scheint sich positiv auf die Produktivität der
+Beitragsempfangenden auszuwirken: Sie konnten dank der Förderung mehr
+publizieren. Unabhängig von der Kohorte sind die Daten hier jedoch weniger
+einheitlich: 50-60% der Beitragsempfangenden geben an, dass diese Aussage
+voll und ganz zutrifft, 30-40% stimmen teilweise zu. Nur eine Minderheit
+der Beitragsempfangenden (15-20%) stellt eine Wirkung des Beitrags auf die
+Zahl der Forschungspublikationen infrage.
+
+::: plot-box
+::: plot-title
+Der Ambizione-Beitrag hat die Qualität meiner wissenschaftlichen Publikationen verbessert:
+:::
+
+```{r improved-publication-quality-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("improved.quality.of.scientific.publications") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+Eine deutliche Mehrheit der Beitragsempfangenden beider Kohorten (75-80%)
+ist der Meinung, dass sich die Qualität ihrer wissenschaftlichen Publikationen
+dank Ambizione verbessert hat. Wie gross diese positive Wirkung war, wird
+weniger einheitlich beurteilt, und eine Minderheit (<20%) bezweifelt, ob
+sich der Beitrag positiv auf die Qualität ihrer Publikationen ausgewirkt hat --
+unabhängig von der Kohorte.
+
+### Auswirkungen auf das Netzwerk
+
+::: plot-box
+::: plot-title
+Dank dem Ambizione-Beitrag konnte ich meine internationale Vernetzung ausbauen:
+:::
+
+```{r improved-networking-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("improved.networking") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+Eine deutliche Mehrheit der Beitragsempfangenden beider Kohorten (75-80%)
+ist der Meinung, dass sich der Beitrag positiv auf die Entwicklung ihres
+internationalen Netzwerks ausgewirkt hat. Die Ergebnisse sind jedoch nicht
+einheitlich: 35-40% der Beitragsempfangenden erachten die positive
+Wirkung als stark, 35-50% hingegen stimmen nur teilweise zu. Lediglich
+3% der Beitragsempfangenden spürten keine Wirkung von Ambizione auf
+ihr internationales Netzwerk -- unabhängig von der Kohorte.
+
+::: plot-box
+::: plot-title
+Der Ambizione-Beitrag hat mir den Zugang zu führenden Forschenden in meiner
+Disziplin erleichtert:
+:::
+
+```{r leading-scientist-access-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("easier.access.to.leading.scientists") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+:::
+
+In beiden Kohorten ist eine deutliche Mehrheit der Beitragsempfangenden
+(70-75%) der Meinung, dass sie durch den Ambizione-Beitrag einen besseren
+Zugang zu führenden Forschenden in ihrer Disziplin erhalten haben. Allerdings
+stimmen nur 30% dieser Aussage voll und ganz zu, während 40-45%
+teilweise zustimmten. Rund 25% der Beitragsempfangenden beider Kohorten
+geben an, dass Ambizione ihnen den Zugang zu führenden Forschenden in ihrer
+Disziplin nicht erleichtert habe.
+
+::: plot-box
+::: plot-title
+Der Ambizione-Beitrag hat es mir ermöglicht, in der Schweizer Forschung Fuss zu
+fassen:
+:::
+
+```{r return-swiss-science-scene-plot}
+#| out-width: "100%"
+#| fig-height: 2
+
+surveys %>%
+  comparison_df("enabled.to.return.to.swiss.science.scene") %>%
+  comparison_transl %>%
+  comparison_plot
+```
+
+::: caption
+Bis 2012 mussten die Gesuchstellenden einen Auslandaufenthalt absolvieren,
+bevor sie sich um einen Ambizione-Förderbeitrag bewerben konnten. Von 2012 bis
+2020 einen Aufenthalt an einer anderen Institution als derjenigen, wo sie
+promoviert hatten.
+:::
+
+:::
+
+Ob es der Ambizione-Beitrag den Forschenden ermöglicht hat, nach einem
+Auslandaufenthalt in der Schweiz Fuss zu fassen, beantworten beide Kohorten
+weniger eindeutig. In der Kohorte «1 Jahr nach der Förderung» sind rund 50% der
+Beitragsempfangenden der Meinung, dass die Ambizione-Förderung es ihnen
+ermöglichte, in der Schweizer Forschungslandschaft Fuss zu fassen. 25% sind
+anderer Meinung. Interessanterweise können 25% der Befragten nicht sagen, ob die
+Ambizione-Förderung ihnen in dieser Hinsicht geholfen hat.
+
+In der Kohorte «5 Jahre nach der Förderung» äussern sich die
+Ambizione-Beitragsempfangenden positiver (rund 55%) über die Auswirkungen
+des Beitrags auf ihre Integration in die Schweizer Forschungsgemeinschaft.
+Gleichzeitig sind jedoch mehr Beitragsempfangende (30%) der Meinung, dass
+die Unterstützung durch Ambizione nicht viel dazu beigetragen hat, in der
+Schweizer Forschung Fuss zu fassen. Wie in der Kohorte «1 Jahr nach der
+Förderung» können viele Beitragsempfangende (etwa 20%) nicht sagen, ob der
+Ambizione-Beitrag ihnen geholfen hat, dieses Ziel zu erreichen.
+
+### Auswirkungen auf die Karriere
+
+::: plot-box
+::: plot-title
+Was ist Ihre heutige Position?
+:::
+
+```{r current-position-plot}
+#| out-width: "100%"
+#| fig-height: 3
+
+current_position_lvls <- c("Other position",
+                           "Scientific collaborator",
+                           "Assistant",
+                           "Postdoc",
+                           "Lecturer",
+                           "SNSF professor",
+                           "Assistant professor (without tenure track)",
+                           "Assistant professor (with tenure track)",
+                           "Associate professor",
+                           "Full professor")
+
+surveys %>%
+  comparison_df("current.position", lvls = current_position_lvls) %>%
+  comparison_transl %>%
+  comparison_plot +
+  scale_fill_manual(values = get_datastory_scheme()[-4][10:1],
+                    guide = guide_legend(reverse = TRUE, ncol = 2))
+```
+
+:::
+
+Bei beiden Kohorten waren die ehemaligen Beitragsempfangenden zum
+Befragungszeitpunkt in vielfältigen Positionen tätig. Die grosse Mehrheit beider
+Kohorten (80-85%) war in der akademischen Welt geblieben, entweder mit
+einer Professur oder in der Forschung/wissenschaftlichen Mitarbeit. Nur eine
+Minderheit von 15-20% hatte eine Stelle ausserhalb der Wissenschaft
+angenommen («Andere Position»), zumeist in der Industrie, in der Verwaltung oder
+in der Lehre.
+
+In der Kohorte «1 Jahr nach der Förderung» hatten rund 55% der
+Ambizione-Beitragsempfangenden eine Professur, hauptsächlich
+Assistenzprofessuren, SNF-Förderprofessuren oder Dozierendenstellen (rund
+45%). Etwa 25% der Beitragsempfangenden waren als Postdoktorierende,
+im Rahmen einer Assistenz oder als wissenschaftliche Mitarbeitende tätig.
+
+In der Kohorte «5 Jahre nach der Förderung» hatten rund 70% der
+Ambizione-Beitragsempfangenden eine Stelle auf Professurebene: 40% eine
+ordentliche oder ausserordentliche Professur und 30% eine
+Assistenzprofessur, eine SNF-Förderprofessur oder eine Dozierendenstelle.
+5% waren als Postdoktorierende, im Rahmen einer Assistenz oder als
+wissenschaftliche Mitarbeitende tätig.
+
+### Vielfältige positive Effekte
+
+Zusammenfassend ist festzustellen, dass die Beitragsempfangenden von Ambizione
+die positive Wirkung der Förderung auf ihr wissenschaftliches Profil sehr
+schätzen. Dies gilt insbesondere für die Verbesserung ihrer Kompetenzen, ihres
+Forschungsoutputs, ihrer Wettbewerbsfähigkeit und ihres Forschungsnetzwerks. Im
+Allgemeinen erfuhren sie einen Karriereschub -- unabhängig von der Kohorte und
+ihrer späteren Position.
+
+Daten, Text und Code dieser Datengeschichte sind [auf Github verfügbar](`r params$github_url`) und [auf Zenodo archiviert](`r params$doi`).<br>DOI: `r str_remove(params$doi, "https://doi.org/")`
+
+```{r prevent-internal-snsf-packages, include=FALSE}
+#| include: false
+
+# Internal SNSF packages must not be used in data stories, as their
+# pre-processing functions are internal and the corporate design differs from
+# the data portal.
+if (any(c("snfverse", "snf.preprocessing", "snf.plot") %in% 
+        loadedNamespaces())) {
+  stop(glue(
+    "You must not use internal SNSF packages in data stories.",
+    " Please resort to snf.datastory."
+  ))
+}
+```
